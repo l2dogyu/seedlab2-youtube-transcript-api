@@ -5,8 +5,8 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
 app = FastAPI()
 
 PROXY = {
-    "http": "http://43.130.47.131:56289",  # 여기에 프록시 주소를 넣으세요
-    "https": "http://43.130.47.131:56289"
+    "http": "http://195.154.184.80:8080",  # 여기에 프록시 주소를 넣으세요
+    "https": "http://195.154.184.80:8080"
 }
 
 @app.get("/transcript")
