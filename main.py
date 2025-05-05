@@ -5,8 +5,8 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
 app = FastAPI()
 
 PROXY = {
-    "http": "http://brd-customer-hl_849377fb-zone-residential_proxy1:4dwf9xvfga4g@brd.superproxy.io:33335",
-    "https": "http://brd-customer-hl_849377fb-zone-residential_proxy1:4dwf9xvfga4g@brd.superproxy.io:33335"
+    "http": "http://brd-customer-hl_849377fb-zone-residential_proxy2:izojyedvjzo3@brd.superproxy.io:33335",
+    "https": "http://brd-customer-hl_849377fb-zone-residential_proxy2:izojyedvjzo3@brd.superproxy.io:33335"
 }
 
 @app.get("/transcript")
