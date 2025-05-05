@@ -1,12 +1,13 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
+import os
 
 app = FastAPI()
 
 PROXY = {
-    "http": "http://195.154.184.80:8080",  # 여기에 프록시 주소를 넣으세요
-    "https": "http://195.154.184.80:8080"
+    "http": "http://brd-customer-hl_849377fb-zone-residential_proxy1:4dwf9xvfga4g@brd.superproxy.io:33335",
+    "https": "http://brd-customer-hl_849377fb-zone-residential_proxy1:4dwf9xvfga4g@brd.superproxy.io:33335"
 }
 
 @app.get("/transcript")
