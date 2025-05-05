@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
-import os
 
 app = FastAPI()
 
@@ -11,7 +10,7 @@ PROXY = {
 }
 
 @app.get("/transcript")
-def get_transcript(videoId: str = Query(..., description="YouTube video ID")):
+def get_transcript(videoId: str = Query(...)):
     try:
         transcript = YouTubeTranscriptApi.get_transcript(videoId, languages=['ko', 'en'], proxies=PROXY)
         full_text = ' '.join([entry['text'] for entry in transcript])
