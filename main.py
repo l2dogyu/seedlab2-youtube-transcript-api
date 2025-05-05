@@ -6,7 +6,7 @@ import re
 
 app = FastAPI()
 
-SCRAPERAPI_KEY = "여기에_당신의_ScraperAPI_API키_입력"  # 예: abc123xyz456
+SCRAPERAPI_KEY = "f70288fff3436aca9b43f553e6676805"  # 예: abc123xyz456
 
 @app.get("/transcript")
 def get_transcript(videoId: str = Query(...)):
