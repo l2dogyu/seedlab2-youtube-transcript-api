@@ -1,11 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import httpx
-import re
+import subprocess
+import json
 import os
-from typing import Optional
-from bs4 import BeautifulSoup
-import urllib.parse
+import tempfile
+import re
+import httpx
+from typing import Optional, List, Dict, Any
 
 app = FastAPI()
 
@@ -18,13 +19,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 환경 변수에서 API 키 가져오기
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCe1GYdWRnDUBPikMy0aajvZju9kCoKhMk")
-
-@app.get("/")
-async def root():
-    return {"message": "YouTube API 서버가 실행 중입니다."}
-
 def extract_video_id(url_or_id: str) -> str:
     """YouTube URL 또는 ID에서 영상 ID를 추출"""
     if "youtube.com" in url_or_id or "youtu.be" in url_or_id:
@@ -34,121 +28,134 @@ def extract_video_id(url_or_id: str) -> str:
             return match.group(1)
     return url_or_id
 
-def extract_urls_from_text(text: str) -> list:
-    """텍스트에서 URL 추출"""
-    url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+'
-    return re.findall(url_pattern, text)
-
-async def get_transcript_from_url(url: str) -> str:
-    """URL에서 트랜스크립트 내용 가져오기"""
+def get_subtitle_with_ytdlp(video_id: str) -> Dict[str, Any]:
+    """yt-dlp를 사용하여 자막을 가져옴"""
+    temp_dir = tempfile.mkdtemp()
+    subtitle_path = os.path.join(temp_dir, "subtitle.vtt")
+    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            if response.status_code != 200:
-                return None
+        # 1. 자막 목록 가져오기
+        cmd = [
+            "yt-dlp", 
+            f"https://www.youtube.com/watch?v={video_id}", 
+            "--list-subs", 
+            "-j"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return {"success": False, "error": result.stderr}
+        
+        video_info = json.loads(result.stdout)
+        
+        # 2. 자막 다운로드 (우선순위: 한국어 > 영어 > 자동생성 > 임의)
+        languages = ["ko", "en", "ko-KR", "en-US", "en-GB", "auto"]
+        subtitle_formats = ["vtt", "ttml", "srv3", "srv2", "srv1", "srt"]
+        
+        for lang in languages:
+            for fmt in subtitle_formats:
+                cmd = [
+                    "yt-dlp", 
+                    f"https://www.youtube.com/watch?v={video_id}", 
+                    "--skip-download", 
+                    f"--sub-lang={lang}", 
+                    f"--sub-format={fmt}", 
+                    "--write-sub", 
+                    "--write-auto-sub",
+                    "-o", os.path.join(temp_dir, "subtitle")
+                ]
                 
-            # HTML 파싱
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 텍스트 추출 (스탠포드 대학 페이지 구조에 맞게 조정)
-            transcript = ""
-            content_div = soup.find('div', {'id': 'content-body'})
-            if content_div:
-                # 단락 단위로 텍스트 추출
-                paragraphs = content_div.find_all('p')
-                for p in paragraphs:
-                    transcript += p.get_text() + "\n\n"
-            
-            return transcript.strip() if transcript else None
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # 자막 파일 찾기
+                for file in os.listdir(temp_dir):
+                    if file.endswith(f".{fmt}"):
+                        # 파일 읽기
+                        with open(os.path.join(temp_dir, file), 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # VTT/SRT 파싱하여 텍스트만 추출
+                        lines = content.split('\n')
+                        transcript_text = ""
+                        for line in lines:
+                            # 시간 코드와 메타데이터 제외
+                            if not re.match(r'\d+:\d+:\d+', line) and \
+                               not re.match(r'\d+\s*$', line) and \
+                               '-->' not in line and \
+                               not line.startswith('WEBVTT') and \
+                               line.strip():
+                                transcript_text += line.strip() + " "
+                        
+                        return {
+                            "success": True, 
+                            "transcript": transcript_text.strip(),
+                            "language": lang,
+                            "format": fmt
+                        }
+        
+        # 3. 대체 방법: 스크립트에서 텍스트 추출
+        if video_info.get("description"):
+            return {
+                "success": True,
+                "transcript": video_info.get("description"),
+                "source": "description"
+            }
+        
+        return {"success": False, "error": "자막을 찾을 수 없음"}
+        
     except Exception as e:
-        print(f"URL 내용 가져오기 오류: {str(e)}")
-        return None
+        return {"success": False, "error": str(e)}
+    finally:
+        # 임시 파일 정리
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
-@app.get("/video/{video_id}")
-async def get_video_info(video_id: str):
-    """YouTube 영상 정보 가져오기"""
+@app.get("/")
+async def root():
+    return {"message": "YouTube 자막 추출 API가 실행 중입니다."}
+
+@app.get("/transcript/{video_id}")
+async def get_transcript(video_id: str):
+    """영상 자막 가져오기"""
     try:
         # 영상 ID 추출
         video_id = extract_video_id(video_id)
         
-        # YouTube Data API 호출
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://www.googleapis.com/youtube/v3/videos",
-                params={
-                    "part": "snippet,contentDetails,statistics",
-                    "id": video_id,
-                    "key": GOOGLE_API_KEY
-                }
-            )
+        # yt-dlp로 자막 추출
+        result = get_subtitle_with_ytdlp(video_id)
+        
+        if not result["success"]:
+            # 대체 방법: YouTube API로 영상 정보 가져오기
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://www.youtube.com/watch?v={video_id}",
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                )
+                
+                if response.status_code == 200:
+                    # 페이지에서 자막 데이터 찾기 (고급 파싱 필요)
+                    html = response.text
+                    # 여기서 복잡한 HTML 파싱이 필요함
             
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-            
-            data = response.json()
-            
-            if not data.get("items"):
-                raise HTTPException(status_code=404, detail=f"영상을 찾을 수 없습니다: {video_id}")
-            
-            video = data["items"][0]
-            description = video["snippet"]["description"]
-            
-            # 댓글 정보 가져오기
-            comments_response = await client.get(
-                "https://www.googleapis.com/youtube/v3/commentThreads",
-                params={
-                    "part": "snippet",
-                    "videoId": video_id,
-                    "maxResults": 50,
-                    "order": "relevance",
-                    "key": GOOGLE_API_KEY
-                }
-            )
-            
-            comments = []
-            if comments_response.status_code == 200:
-                comments_data = comments_response.json()
-                comments = [
-                    {
-                        "text": item["snippet"]["topLevelComment"]["snippet"]["textDisplay"],
-                        "likeCount": item["snippet"]["topLevelComment"]["snippet"]["likeCount"],
-                        "authorDisplayName": item["snippet"]["topLevelComment"]["snippet"]["authorDisplayName"]
-                    }
-                    for item in comments_data.get("items", [])
-                ]
-            
-            # 설명에서 URL 추출 및 트랜스크립트 가져오기 시도
-            transcript_text = ""
-            urls = extract_urls_from_text(description)
-            
-            for url in urls:
-                # 가능한 트랜스크립트 URL 패턴
-                if "transcript" in url.lower() or "text" in url.lower():
-                    transcript_content = await get_transcript_from_url(url)
-                    if transcript_content:
-                        transcript_text = transcript_content
-                        break
-            
-            # 스티브 잡스 연설 특별 케이스 (특정 URL 확인)
-            if video_id == "UF8uR6Z6KLc" and not transcript_text:
-                stanford_url = "http://news-service.stanford.edu/news/2005/june15/jobs-061505.html"
-                transcript_text = await get_transcript_from_url(stanford_url)
-            
-            # 리턴할 정보 구성
             return {
                 "video_id": video_id,
-                "title": video["snippet"]["title"],
-                "description": description,
-                "publishedAt": video["snippet"]["publishedAt"],
-                "channelTitle": video["snippet"]["channelTitle"],
-                "viewCount": video["statistics"].get("viewCount", "0"),
-                "likeCount": video["statistics"].get("likeCount", "0"),
-                "commentCount": video["statistics"].get("commentCount", "0"),
-                "comments": comments,
-                "transcript": transcript_text,
-                "has_transcript": bool(transcript_text),
-                "transcript_source": "external_url" if transcript_text else "none"
+                "has_transcript": False,
+                "error": result.get("error", "자막을 찾을 수 없음"),
+                "message": "영상에 접근 가능한 자막이 없습니다."
             }
             
+        return {
+            "video_id": video_id,
+            "has_transcript": True,
+            "transcript": result.get("transcript", ""),
+            "language": result.get("language", "unknown"),
+            "format": result.get("format", "unknown")
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 서버 실행 (개발용)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
