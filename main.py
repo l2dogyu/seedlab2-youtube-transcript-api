@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import re
+import os
 from typing import Optional
 
 app = FastAPI()
@@ -15,8 +16,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 여기에 Google API 키를 입력하세요
-GOOGLE_API_KEY = "AIzaSyCe1GYdWRnDUBPikMy0aajvZju9kCoKhMk"
+# 환경 변수에서 API 키 가져오기 (없으면 기본값 사용)
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyCe1GYdWRnDUBPikMy0aajvZju9kCoKhMk")
 
 @app.get("/")
 async def root():
