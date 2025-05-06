@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 # 여기에 Google API 키를 입력하세요
-GOOGLE_API_KEY = "YOUR_API_KEY_HERE"
+GOOGLE_API_KEY = "AIzaSyCe1GYdWRnDUBPikMy0aajvZju9kCoKhMk"
 
 @app.get("/")
 async def root():
