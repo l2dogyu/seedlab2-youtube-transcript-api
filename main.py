@@ -1,11 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 import re
 
 app = FastAPI()
 
-# CORS 설정 (모든 출처 허용)
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,19 +21,20 @@ async def root():
 @app.get("/transcript/{video_id}")
 async def get_transcript(video_id: str):
     try:
-        # URL에서 video_id 추출 (URL이 입력된 경우)
+        # URL에서 video_id 추출
         if "youtube.com" in video_id or "youtu.be" in video_id:
             pattern = r"(?:v=|\/)([0-9A-Za-z_-]{11}).*"
             match = re.search(pattern, video_id)
             if match:
                 video_id = match.group(1)
         
-        # ID 길이 확인
-        if len(video_id) != 11:
-            raise HTTPException(status_code=400, detail="올바른 YouTube 영상 ID가 아닙니다.")
-            
-        # 자막 가져오기
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko', 'en'])
+        # 다양한 언어로 시도 (언어 제한 없음)
+        try:
+            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        except (TranscriptsDisabled, NoTranscriptFound):
+            # 언어 지정 없이 모든 자막 가져오기 시도
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript = transcript_list.find_transcript(['en', 'ko', 'ja', 'zh-CN', 'zh-TW']).fetch()
         
         # 전체 텍스트 결합
         full_text = " ".join([entry['text'] for entry in transcript])
@@ -45,8 +46,3 @@ async def get_transcript(video_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-# 로컬 테스트용
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
