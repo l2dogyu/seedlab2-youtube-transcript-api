@@ -4,6 +4,7 @@ import httpx
 import re
 import os
 from typing import Optional
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 app = FastAPI()
 
@@ -31,6 +32,30 @@ def extract_video_id(url_or_id: str) -> str:
         if match:
             return match.group(1)
     return url_or_id
+
+def get_transcript(video_id: str):
+    """영상 자막 가져오기 - 여러 언어 시도"""
+    try:
+        # 먼저 한국어 자막 시도
+        return YouTubeTranscriptApi.get_transcript(video_id, languages=['ko'])
+    except Exception:
+        try:
+            # 영어 자막 시도
+            return YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+        except Exception:
+            try:
+                # 언어 무관하게 시도
+                return YouTubeTranscriptApi.get_transcript(video_id)
+            except Exception:
+                try:
+                    # 모든 가능한 자막 찾기
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                    # 아무 언어나 가져오기
+                    transcript = transcript_list.find_transcript(['ko', 'en', 'ja', 'zh-CN', 'zh-TW'])
+                    return transcript.fetch()
+                except Exception as e:
+                    # 모든 시도 실패
+                    return None
 
 @app.get("/video/{video_id}")
 async def get_video_info(video_id: str):
@@ -84,6 +109,16 @@ async def get_video_info(video_id: str):
                     for item in comments_data.get("items", [])
                 ]
             
+            # 자막 가져오기 시도
+            transcript_data = get_transcript(video_id)
+            transcript_text = ""
+            transcript = []
+            
+            if transcript_data:
+                transcript = transcript_data
+                # 전체 텍스트 결합
+                transcript_text = " ".join([entry.get('text', '') for entry in transcript_data])
+            
             # 리턴할 정보 구성
             return {
                 "video_id": video_id,
@@ -94,7 +129,10 @@ async def get_video_info(video_id: str):
                 "viewCount": video["statistics"].get("viewCount", "0"),
                 "likeCount": video["statistics"].get("likeCount", "0"),
                 "commentCount": video["statistics"].get("commentCount", "0"),
-                "comments": comments
+                "comments": comments,
+                "transcript": transcript,
+                "full_transcript": transcript_text,
+                "has_transcript": bool(transcript_data)
             }
             
     except Exception as e:
@@ -135,5 +173,32 @@ async def search_videos(query: str, max_results: Optional[int] = 10):
             
             return {"results": results}
             
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/transcript/{video_id}")
+async def get_only_transcript(video_id: str):
+    """영상 자막만 가져오기"""
+    try:
+        video_id = extract_video_id(video_id)
+        transcript_data = get_transcript(video_id)
+        
+        if not transcript_data:
+            return {
+                "video_id": video_id,
+                "has_transcript": False,
+                "message": "이 영상에는 자막이 없거나 접근할 수 없습니다."
+            }
+            
+        # 전체 텍스트 결합
+        full_text = " ".join([entry.get('text', '') for entry in transcript_data])
+        
+        return {
+            "video_id": video_id,
+            "has_transcript": True,
+            "transcript": transcript_data,
+            "full_transcript": full_text
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
